@@ -70,6 +70,10 @@ func (l *PackageLoader) loadPackages(ctx context.Context, loadMode packages.Load
 
 	l.prepareBuildContext()
 
+	if l.cfg.Run.LoadDepsFromSource {
+		loadMode &^= packages.NeedExportFile
+	}
+
 	conf := &packages.Config{
 		Mode:       loadMode,
 		Tests:      l.cfg.Run.AnalyzeTests,

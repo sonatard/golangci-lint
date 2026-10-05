@@ -200,6 +200,64 @@ func TestCgoWithIssues(t *testing.T) {
 }
 
 // https://pkg.go.dev/cmd/compile#hdr-Compiler_Directives
+func TestLoadDepsFromSource(t *testing.T) {
+	binPath := testshared.InstallGolangciLint(t)
+
+	testCases := []struct {
+		desc       string
+		args       []string
+		exportData bool
+		expected   string
+	}{
+		{
+			desc:       "govet with export data",
+			args:       []string{"--no-config", "--default=none", "-Egovet", "-v"},
+			exportData: true,
+			expected:   `dep.Printf format %d has arg "x" of wrong type string`,
+		},
+		{
+			desc:       "govet with dependencies loaded from source",
+			args:       []string{"--no-config", "--default=none", "-Egovet", "-v", "--load-deps-from-source"},
+			exportData: false,
+			expected:   `dep.Printf format %d has arg "x" of wrong type string`,
+		},
+		{
+			desc:       "staticcheck with export data",
+			args:       []string{"--no-config", "--default=none", "-Estaticcheck", "-v"},
+			exportData: true,
+			expected:   "dep.Old is deprecated: use New instead.",
+		},
+		{
+			desc:       "staticcheck with dependencies loaded from source",
+			args:       []string{"--no-config", "--default=none", "-Estaticcheck", "-v", "--load-deps-from-source"},
+			exportData: false,
+			expected:   "dep.Old is deprecated: use New instead.",
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			result := testshared.NewRunnerBuilder(t).
+				WithArgs(test.args...).
+				WithTargetPath(testdataDir, "load_deps_from_source").
+				WithBinPath(binPath).
+				Runner().
+				Run().
+				ExpectHasIssue(test.expected)
+
+			// The verbose output prints the load mode of the packages:
+			// "exports_file" means that `go list -export` compiled the dependencies.
+			if test.exportData {
+				result.ExpectOutputContains("exports_file")
+			} else {
+				result.ExpectOutputNotContains("exports_file")
+			}
+		})
+	}
+}
+
 func TestLineDirective(t *testing.T) {
 	binPath := testshared.InstallGolangciLint(t)
 

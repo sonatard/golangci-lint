@@ -28,6 +28,8 @@ type Run struct {
 
 	AllowParallelRunners bool `mapstructure:"allow-parallel-runners"`
 	AllowSerialRunners   bool `mapstructure:"allow-serial-runners"`
+
+	LoadDepsFromSource bool `mapstructure:"load-deps-from-source"`
 }
 
 func (r *Run) Validate() error {

@@ -57,6 +57,11 @@ func setupRunFlagSet(v *viper.Viper, fs *pflag.FlagSet) {
 	const allowSerialDesc = "Allow multiple golangci-lint instances running, but serialize them around a lock.\n" +
 		"If false (default) - golangci-lint exits with an error if it fails to acquire file lock on start."
 	internal.AddFlagAndBind(v, fs, fs.Bool, "allow-serial-runners", "run.allow-serial-runners", false, color.GreenString(allowSerialDesc))
+
+	const loadDepsFromSourceDesc = "Type-check dependencies from source instead of reading their export data.\n" +
+		"It avoids compiling the dependencies with go list -export."
+	internal.AddFlagAndBind(v, fs, fs.Bool, "load-deps-from-source", "run.load-deps-from-source", false,
+		color.GreenString(loadDepsFromSourceDesc))
 }
 
 func setupOutputFlagSet(v *viper.Viper, fs *pflag.FlagSet) {

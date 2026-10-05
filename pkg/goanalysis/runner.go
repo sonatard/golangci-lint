@@ -55,10 +55,13 @@ type runner struct {
 	passToPkg      map[*analysis.Pass]*packages.Package
 	passToPkgGuard sync.Mutex
 	sw             *timeutils.Stopwatch
+
+	// loadDepsFromSource type-checks the dependencies from source instead of reading their export data.
+	loadDepsFromSource bool
 }
 
 func newRunner(prefix string, logger logutils.Log, pkgCache *cache.Cache, loadGuard *load.Guard,
-	loadMode LoadMode, sw *timeutils.Stopwatch,
+	loadMode LoadMode, loadDepsFromSource bool, sw *timeutils.Stopwatch,
 ) *runner {
 	return &runner{
 		prefix:    prefix,
@@ -68,6 +71,8 @@ func newRunner(prefix string, logger logutils.Log, pkgCache *cache.Cache, loadGu
 		loadMode:  loadMode,
 		passToPkg: map[*analysis.Pass]*packages.Package{},
 		sw:        sw,
+
+		loadDepsFromSource: loadDepsFromSource,
 	}
 }
 
@@ -249,6 +254,8 @@ func (r *runner) analyze(pkgs []*packages.Package, analyzers []*analysis.Analyze
 			actions:    actionPerPkg[pkg],
 			loadGuard:  r.loadGuard,
 			dependents: 1, // self dependent
+
+			loadDepsFromSource: r.loadDepsFromSource,
 		}
 	}
 	for _, act := range actions {

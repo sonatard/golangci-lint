@@ -39,6 +39,9 @@ type loadingPackage struct {
 	dependents  int32 // number of depending on it packages
 	analyzeOnce sync.Once
 	decUseMutex sync.Mutex
+
+	// loadDepsFromSource type-checks this package from source instead of reading its export data, when it is a dependency.
+	loadDepsFromSource bool
 }
 
 func (lp *loadingPackage) analyzeRecursive(ctx context.Context, cancel context.CancelFunc, loadMode LoadMode, loadSem chan struct{}) {
@@ -316,6 +319,10 @@ func (lp *loadingPackage) loadWithFacts(loadMode LoadMode) error {
 }
 
 func (lp *loadingPackage) loadImportedPackageWithFacts(loadMode LoadMode) error {
+	if lp.loadDepsFromSource && loadMode >= LoadModeTypesInfo {
+		return lp.loadImportedPackageFromSourceWithFacts(loadMode)
+	}
+
 	pkg := lp.pkg
 
 	// Load package from export data
@@ -397,6 +404,27 @@ func (lp *loadingPackage) loadImportedPackageWithFacts(loadMode LoadMode) error 
 		}
 
 		return nil
+	}
+
+	return nil
+}
+
+// loadImportedPackageFromSourceWithFacts type-checks a dependency from source, then loads its cached facts.
+// The actions without cached facts are analyzed from source later, using the same types.
+func (lp *loadingPackage) loadImportedPackageFromSourceWithFacts(loadMode LoadMode) error {
+	if err := lp.loadFromSource(loadMode); err != nil {
+		return err
+	}
+
+	for _, act := range lp.actions {
+		if act.loadActionCachedFacts(false) {
+			continue
+		}
+
+		// Cached facts loading failed: analyze later the action from source.
+		factsCacheDebugf("Loading of facts for %s failed, analyze it from source later", act)
+		act.needAnalyzeSource = true // can't be set in parallel
+		act.markDepsForAnalyzingSource()
 	}
 
 	return nil

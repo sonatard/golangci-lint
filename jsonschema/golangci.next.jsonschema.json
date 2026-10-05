@@ -4948,6 +4948,11 @@
           "type": "boolean",
           "default": false
         },
+        "load-deps-from-source": {
+          "description": "Type-check dependencies from source instead of reading their export data. It avoids compiling the dependencies with `go list -export`.",
+          "type": "boolean",
+          "default": false
+        },
         "go": {
           "description": "Targeted Go version.",
           "type": "string",
