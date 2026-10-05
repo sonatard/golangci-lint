@@ -9,6 +9,7 @@ import (
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/packages"
 
+	"github.com/golangci/golangci-lint/v2/pkg/config"
 	"github.com/golangci/golangci-lint/v2/pkg/goanalysis/pkgerrors"
 	"github.com/golangci/golangci-lint/v2/pkg/lint/linter"
 	"github.com/golangci/golangci-lint/v2/pkg/logutils"
@@ -32,7 +33,7 @@ func runAnalyzers(cfg runAnalyzersConfig, lintCtx *linter.Context) ([]*result.Is
 	const stagesToPrint = 10
 	defer sw.PrintTopStages(stagesToPrint)
 
-	runner := newRunner(cfg.getName(), log, lintCtx.PkgCache, lintCtx.LoadGuard, cfg.getLoadMode(), sw)
+	runner := newRunner(cfg.getName(), log, lintCtx.PkgCache, lintCtx.LoadGuard, cfg.getLoadMode(), lintCtx.Cfg.Run.DepsMode == config.DepsModeSource, sw)
 
 	pkgs := lintCtx.Packages
 	if cfg.useOriginalPackages() {

@@ -39,6 +39,9 @@ type loadingPackage struct {
 	dependents  int32 // number of depending on it packages
 	analyzeOnce sync.Once
 	decUseMutex sync.Mutex
+
+	// depsFromSource type-checks this package from source instead of reading its export data, when it is a dependency.
+	depsFromSource bool
 }
 
 func (lp *loadingPackage) analyzeRecursive(ctx context.Context, cancel context.CancelFunc, loadMode LoadMode, loadSem chan struct{}) {
@@ -294,15 +297,7 @@ func (lp *loadingPackage) loadWithFacts(loadMode LoadMode) error {
 	if pkg.TypesInfo != nil {
 		// Already loaded package, e.g. because another not go/analysis linter required types for deps.
 		// Try load cached facts for it.
-
-		for _, act := range lp.actions {
-			if !act.loadActionCachedFacts(false) {
-				// Cached facts loading failed: analyze later the action from source.
-				act.needAnalyzeSource = true
-				factsCacheDebugf("Loading of facts for already loaded %s failed, analyze it from source later", act)
-				act.markDepsForAnalyzingSource()
-			}
-		}
+		lp.loadCachedFacts()
 		return nil
 	}
 
@@ -316,6 +311,10 @@ func (lp *loadingPackage) loadWithFacts(loadMode LoadMode) error {
 }
 
 func (lp *loadingPackage) loadImportedPackageWithFacts(loadMode LoadMode) error {
+	if lp.depsFromSource && loadMode >= LoadModeTypesInfo {
+		return lp.loadImportedPackageFromSourceWithFacts(loadMode)
+	}
+
 	pkg := lp.pkg
 
 	// Load package from export data
@@ -347,21 +346,7 @@ func (lp *loadingPackage) loadImportedPackageWithFacts(loadMode LoadMode) error 
 		}
 	}
 
-	needLoadFromSource := false
-	for _, act := range lp.actions {
-		if act.loadActionCachedFacts(false) {
-			continue
-		}
-
-		// Cached facts loading failed: analyze later the action from source.
-		factsCacheDebugf("Loading of facts for %s failed, analyze it from source later", act)
-		act.needAnalyzeSource = true // can't be set in parallel
-		needLoadFromSource = true
-
-		act.markDepsForAnalyzingSource()
-	}
-
-	if needLoadFromSource {
+	if lp.loadCachedFacts() {
 		// Cached facts loading failed: analyze later the action from source. To perform
 		// the analysis we need to load the package from source code.
 
@@ -400,6 +385,45 @@ func (lp *loadingPackage) loadImportedPackageWithFacts(loadMode LoadMode) error 
 	}
 
 	return nil
+}
+
+// loadImportedPackageFromSourceWithFacts type-checks a dependency from source, then loads its cached facts.
+// The actions without cached facts are analyzed from source later, using the same types.
+func (lp *loadingPackage) loadImportedPackageFromSourceWithFacts(loadMode LoadMode) error {
+	if err := lp.loadFromSource(loadMode); err != nil {
+		return err
+	}
+
+	// Go list or parse errors leave no types to load the facts into.
+	if lp.pkg.Types == nil {
+		return nil
+	}
+
+	lp.loadCachedFacts()
+
+	return nil
+}
+
+// loadCachedFacts loads the cached facts of the actions,
+// and marks the actions without cached facts to be analyzed from source later.
+// It reports whether at least one action needs to be analyzed from source.
+func (lp *loadingPackage) loadCachedFacts() bool {
+	needAnalyzeSource := false
+
+	for _, act := range lp.actions {
+		if act.loadActionCachedFacts(false) {
+			continue
+		}
+
+		// Cached facts loading failed: analyze later the action from source.
+		factsCacheDebugf("Loading of facts for %s failed, analyze it from source later", act)
+		act.needAnalyzeSource = true // can't be set in parallel
+		needAnalyzeSource = true
+
+		act.markDepsForAnalyzingSource()
+	}
+
+	return needAnalyzeSource
 }
 
 func (lp *loadingPackage) decUse(canClearTypes bool) {
