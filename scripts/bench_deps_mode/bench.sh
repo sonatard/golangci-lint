@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Measures golangci-lint with run.deps-mode export and source on a project.
 #
-# usage: bench.sh <golangci-lint binary> <project dir> <output dir> <repetitions>
+# usage: bench.sh <golangci-lint binary> <project dir> <output dir> <repetitions> [<golangci-lint binary of source-full>]
+#
+# Modes: export, source, and source-full (the source mode of another binary, ex: before a change).
 #
 # Scenarios:
 # - cold: the build cache and the lint cache are empty.
@@ -13,6 +15,7 @@ bin=$(realpath "$1")
 project=$2
 out=$(realpath "$3")
 reps=$4
+full_bin=${5:+$(realpath "$5")}
 
 measure=$(realpath "$(dirname "$0")/measure.py")
 
@@ -25,10 +28,17 @@ run() {
   local label="${scenario}/${mode}/${rep}"
   local issues="$out/issues-${scenario}-${mode}-${rep}.json"
 
-  python3 "$measure" "$label" "$bin" run \
+  local b=$bin flag=$mode
+  if [ "$mode" = source-full ]; then
+    b=$full_bin flag=source
+  fi
+
+  echo "=== $label" >> "$out/stderr.log"
+
+  python3 "$measure" "$label" "$b" run -v \
     --no-config --default=standard -E "$linters" \
     --max-issues-per-linter=0 --max-same-issues=0 --uniq-by-line=false \
-    --timeout=0 --deps-mode="$mode" \
+    --timeout=0 --deps-mode="$flag" \
     --output.json.path="$issues" \
     ./... >> "$out/results.jsonl" 2>> "$out/stderr.log" || true
 
@@ -41,7 +51,12 @@ clean_all() {
 }
 
 for rep in $(seq 1 "$reps"); do
-  for mode in export source; do
+  modes="export source"
+  if [ -n "$full_bin" ]; then
+    modes="$modes source-full"
+  fi
+
+  for mode in $modes; do
     clean_all
     run cold "$mode" "$rep"
 

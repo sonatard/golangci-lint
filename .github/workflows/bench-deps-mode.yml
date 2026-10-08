@@ -21,8 +21,8 @@ jobs:
           - mattn/go-sqlite3
           - google/uuid
         go:
-          # The results of '1.27.0' are in the first run.
-          - tip
+          # The first run measured '1.27.0' without source-full, the second run measured 'tip'.
+          - '1.27.0'
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -32,6 +32,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.0'
@@ -51,6 +52,11 @@ jobs:
         run: |
           go version
           go build -o "$RUNNER_TEMP/golangci-lint" ./cmd/golangci-lint
+      - name: Build golangci-lint before IgnoreFuncBodies (source-full)
+        run: |
+          git worktree add "$RUNNER_TEMP/full" 070a960d
+          cd "$RUNNER_TEMP/full"
+          go build -o "$RUNNER_TEMP/golangci-lint-full" ./cmd/golangci-lint
       - name: Clone the project
         env:
           PROJECT: ${{ matrix.project }}
@@ -74,7 +80,7 @@ jobs:
             free -m | sed -n 2p
           } > "$out/env.txt"
           cat "$out/env.txt"
-          bash scripts/bench_deps_mode/bench.sh "$RUNNER_TEMP/golangci-lint" "$RUNNER_TEMP/project" "$out" 3
+          bash scripts/bench_deps_mode/bench.sh "$RUNNER_TEMP/golangci-lint" "$RUNNER_TEMP/project" "$out" 3 "$RUNNER_TEMP/golangci-lint-full"
       - name: Name the artifact
         id: name
         env:

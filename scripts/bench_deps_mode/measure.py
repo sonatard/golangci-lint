@@ -16,7 +16,8 @@ PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
 
 
 def group_rss(pgid):
-    total = 0
+    """Returns the summed RSS of the process group, and the RSS of its leader."""
+    total = leader = 0
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
@@ -28,10 +29,13 @@ def group_rss(pgid):
             if int(fields[2]) != pgid:
                 continue
             with open(f"/proc/{entry}/statm") as f:
-                total += int(f.read().split()[1]) * PAGE_SIZE
+                rss = int(f.read().split()[1]) * PAGE_SIZE
+            total += rss
+            if int(entry) == pgid:
+                leader = rss
         except (OSError, ValueError, IndexError):
             continue
-    return total
+    return total, leader
 
 
 def main():
@@ -40,9 +44,10 @@ def main():
     start = time.monotonic()
     proc = subprocess.Popen(cmd, start_new_session=True, stdout=subprocess.DEVNULL, stderr=sys.stderr)
 
-    peak = 0
+    peak = peak_leader = 0
     while proc.poll() is None:
-        peak = max(peak, group_rss(proc.pid))
+        total, leader = group_rss(proc.pid)
+        peak, peak_leader = max(peak, total), max(peak_leader, leader)
         time.sleep(0.5)
 
     elapsed = time.monotonic() - start
@@ -51,6 +56,7 @@ def main():
         "label": label,
         "seconds": round(elapsed, 1),
         "peak_rss_mb": round(peak / 2**20),
+        "peak_rss_golangci_lint_mb": round(peak_leader / 2**20),
         "exit_code": proc.returncode,
     }), flush=True)
 
