@@ -63,6 +63,52 @@ func TestCheckGoVersion(t *testing.T) {
 	}
 }
 
+func TestCheckToolchainVersion(t *testing.T) {
+	testCases := []struct {
+		desc    string
+		version string
+		require require.ErrorAssertionFunc
+	}{
+		{
+			desc:    "version greater than runtime version",
+			version: "go1.30.1",
+			require: require.Error,
+		},
+		{
+			desc:    "devel version greater than runtime version",
+			version: "devel go1.30-e705a2d Wed Aug 7 01:16:42 2024 +0000",
+			require: require.Error,
+		},
+		{
+			desc: "version equals to runtime version",
+			version: func() string {
+				rv, _ := CleanRuntimeVersion()
+				return rv
+			}(),
+			require: require.NoError,
+		},
+		{
+			desc:    "version lower than runtime version",
+			version: "go1.19.1",
+			require: require.NoError,
+		},
+		{
+			desc:    "invalid version",
+			version: "1.19.1",
+			require: require.Error,
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			err := CheckToolchainVersion(test.version)
+			test.require(t, err)
+		})
+	}
+}
+
 func TestTrimGoVersion(t *testing.T) {
 	testCases := []struct {
 		desc     string

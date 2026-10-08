@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/ldez/grignotin/goenv"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
@@ -109,6 +110,13 @@ func (l *Loader) Load(opts LoadOptions) error {
 		return err
 	}
 
+	if l.cfg.Run.DepsMode == DepsModeSource {
+		err = checkToolchainVersion(context.Background())
+		if err != nil {
+			return err
+		}
+	}
+
 	l.cfg.basePath, err = fsutils.GetBasePath(context.Background(), l.cfg.Run.RelativePathMode, l.cfg.cfgDir)
 	if err != nil {
 		return fmt.Errorf("get base path: %w", err)
@@ -178,6 +186,17 @@ func (l *Loader) handleGoVersion() {
 	l.cfg.Linters.Settings.Gocritic.Go = trimmedGoVersion
 
 	os.Setenv("GOSECGOVERSION", l.cfg.Run.Go)
+}
+
+// checkToolchainVersion checks that the dependencies, including the standard library of the toolchain,
+// can be type-checked from source by golangci-lint.
+func checkToolchainVersion(ctx context.Context) error {
+	values, err := goenv.Get(ctx, goenv.GOVERSION)
+	if err != nil {
+		return fmt.Errorf("get the Go version of the toolchain: %w", err)
+	}
+
+	return goutil.CheckToolchainVersion(values[goenv.GOVERSION])
 }
 
 func (l *Loader) handleDeprecation() error {

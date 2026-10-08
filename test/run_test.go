@@ -210,7 +210,7 @@ func TestDepsMode(t *testing.T) {
 	}{
 		{
 			desc:       "govet with deps-mode export",
-			args:       []string{"--no-config", "--default=none", "-Egovet", "-v"},
+			args:       []string{"--no-config", "--default=none", "-Egovet", "-v", "--deps-mode=export"},
 			exportData: true,
 			expected:   `dep.Printf format %d has arg "x" of wrong type string`,
 		},
@@ -222,7 +222,7 @@ func TestDepsMode(t *testing.T) {
 		},
 		{
 			desc:       "staticcheck with deps-mode export",
-			args:       []string{"--no-config", "--default=none", "-Estaticcheck", "-v"},
+			args:       []string{"--no-config", "--default=none", "-Estaticcheck", "-v", "--deps-mode=export"},
 			exportData: true,
 			expected:   "dep.Old is deprecated: use New instead.",
 		},
