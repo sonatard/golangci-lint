@@ -21,7 +21,7 @@ jobs:
           - mattn/go-sqlite3
           - google/uuid
         go:
-          - '1.27.0'
+          # The results of '1.27.0' are in the first run.
           - tip
     runs-on: ubuntu-latest
     timeout-minutes: 300
@@ -42,6 +42,11 @@ jobs:
           go install golang.org/dl/gotip@latest
           gotip download
           echo "$HOME/sdk/gotip/bin" >> "$GITHUB_PATH"
+      - name: Update x/tools to read the output of cmd/export (golang/go#79427)
+        if: matrix.go == 'tip'
+        run: |
+          go get golang.org/x/tools@v0.51.1-0.20261002205739-3f3efb7c3b31
+          go mod tidy
       - name: Build golangci-lint
         run: |
           go version
