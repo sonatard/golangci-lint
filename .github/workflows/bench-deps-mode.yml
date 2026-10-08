@@ -1,0 +1,83 @@
+name: Benchmark deps-mode
+on:
+  push:
+    branches:
+      - bench-deps-mode
+
+permissions: {}
+
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - gohugoio/hugo
+          - prometheus/prometheus
+          - cli/cli
+          - samber/lo
+          - sirupsen/logrus
+          - spf13/cobra
+          - mattn/go-sqlite3
+          - google/uuid
+        go:
+          - '1.27.0'
+          - tip
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.0'
+          cache: false
+      - name: Install Go tip
+        if: matrix.go == 'tip'
+        run: |
+          go install golang.org/dl/gotip@latest
+          gotip download
+          echo "$HOME/sdk/gotip/bin" >> "$GITHUB_PATH"
+      - name: Build golangci-lint
+        run: |
+          go version
+          go build -o "$RUNNER_TEMP/golangci-lint" ./cmd/golangci-lint
+      - name: Clone the project
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          git clone --depth 1 "https://github.com/$PROJECT.git" "$RUNNER_TEMP/project"
+          cd "$RUNNER_TEMP/project"
+          go mod download
+      - name: Measure
+        env:
+          PROJECT: ${{ matrix.project }}
+          GO: ${{ matrix.go }}
+        run: |
+          out="$RUNNER_TEMP/out"
+          mkdir -p "$out"
+          {
+            echo "project=$PROJECT"
+            echo "commit=$(git -C "$RUNNER_TEMP/project" rev-parse HEAD)"
+            echo "go=$(go version)"
+            echo "golangci-lint=$GITHUB_SHA"
+            echo "nproc=$(nproc)"
+            free -m | sed -n 2p
+          } > "$out/env.txt"
+          cat "$out/env.txt"
+          bash scripts/bench_deps_mode/bench.sh "$RUNNER_TEMP/golangci-lint" "$RUNNER_TEMP/project" "$out" 3
+      - name: Name the artifact
+        id: name
+        env:
+          PROJECT: ${{ matrix.project }}
+          GO: ${{ matrix.go }}
+        run: echo "name=bench-${PROJECT//\//-}-$GO" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: ${{ runner.temp }}/out
