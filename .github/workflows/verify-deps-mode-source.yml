@@ -1,0 +1,51 @@
+name: Verify deps-mode source
+on:
+  push:
+    branches:
+      - verify-deps-mode-source
+
+permissions: {}
+
+env:
+  GO_VERSION: '1.27.0'
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: make.exe test
+        env:
+          GL_TEST_DEPS_MODE: source
+      - name: Run tests
+        if: runner.os != 'Windows'
+        run: make test
+        env:
+          GL_TEST_DEPS_MODE: source
+
+  dep-errors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build golangci-lint
+        run: go build -o "$RUNNER_TEMP/golangci-lint" ./cmd/golangci-lint
+      - name: Report the errors of a dependency outside the module
+        run: bash scripts/verify_deps_mode/dep_errors.sh "$RUNNER_TEMP/golangci-lint" | tee -a "$GITHUB_STEP_SUMMARY"
