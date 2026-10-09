@@ -22,6 +22,9 @@ import (
 // value: "1"
 const envKeepTempFiles = "GL_KEEP_TEMP_FILES"
 
+// value: a value of `run.deps-mode` (ex: "source"), used by the tests that don't set `--deps-mode`.
+const envDepsMode = "GL_TEST_DEPS_MODE"
+
 type RunnerBuilder struct {
 	tb  testing.TB
 	log logutils.Log
@@ -166,6 +169,10 @@ func (b *RunnerBuilder) Runner() *Runner {
 		if b.allowParallelRunners {
 			arguments = append(arguments, "--allow-parallel-runners")
 		}
+
+		if mode := os.Getenv(envDepsMode); mode != "" && !slices.ContainsFunc(b.args, isDepsModeArg) {
+			arguments = append(arguments, "--deps-mode="+mode)
+		}
 	}
 
 	if b.noConfig {
@@ -192,6 +199,10 @@ func (b *RunnerBuilder) Runner() *Runner {
 		command: b.command,
 		args:    arguments,
 	}
+}
+
+func isDepsModeArg(arg string) bool {
+	return arg == "--deps-mode" || strings.HasPrefix(arg, "--deps-mode=")
 }
 
 type Runner struct {
@@ -265,8 +276,9 @@ func (r *Runner) Command() *exec.Cmd {
 
 	//nolint:gosec // we don't use user input here
 	cmd := exec.CommandContext(r.tb.Context(), r.binPath, runArgs...)
-	cmd.Env = append(os.Environ(), r.env...)
-	cmd.Env = append(cmd.Env, "GOLANGCI_LINT_CACHE="+r.tb.TempDir())
+	// A test can share a cache between several runs with WithEnviron("GOLANGCI_LINT_CACHE=...").
+	cmd.Env = append(os.Environ(), "GOLANGCI_LINT_CACHE="+r.tb.TempDir())
+	cmd.Env = append(cmd.Env, r.env...)
 
 	return cmd
 }

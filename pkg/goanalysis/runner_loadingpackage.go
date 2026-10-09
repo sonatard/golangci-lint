@@ -39,6 +39,9 @@ type loadingPackage struct {
 	dependents  int32 // number of depending on it packages
 	analyzeOnce sync.Once
 	decUseMutex sync.Mutex
+
+	// depsFromSource type-checks this package from source instead of reading its export data, when it is a dependency.
+	depsFromSource bool
 }
 
 func (lp *loadingPackage) analyzeRecursive(ctx context.Context, cancel context.CancelFunc, loadMode LoadMode, loadSem chan struct{}) {
@@ -119,6 +122,50 @@ func (lp *loadingPackage) analyze(ctx context.Context, cancel context.CancelFunc
 func (lp *loadingPackage) loadFromSource(loadMode LoadMode) error {
 	pkg := lp.pkg
 
+	if !lp.parseFiles(parser.ParseComments) {
+		return nil
+	}
+
+	if loadMode == LoadModeSyntax {
+		return nil
+	}
+
+	pkg.TypesInfo = &types.Info{
+		Types:        make(map[ast.Expr]types.TypeAndValue),
+		Instances:    make(map[*ast.Ident]types.Instance),
+		Defs:         make(map[*ast.Ident]types.Object),
+		Uses:         make(map[*ast.Ident]types.Object),
+		Implicits:    make(map[ast.Node]types.Object),
+		Selections:   make(map[*ast.SelectorExpr]*types.Selection),
+		Scopes:       make(map[ast.Node]*types.Scope),
+		FileVersions: make(map[*ast.File]string),
+	}
+
+	return lp.typeCheck(pkg.TypesInfo, false)
+}
+
+// loadTypesFromSource type-checks the package from source without the function bodies,
+// and keeps only the types, like the export data:
+// it is enough to type-check the packages importing it and to load its cached facts.
+func (lp *loadingPackage) loadTypesFromSource() error {
+	pkg := lp.pkg
+
+	if !lp.parseFiles(parser.SkipObjectResolution) {
+		return nil
+	}
+
+	err := lp.typeCheck(nil, true)
+
+	pkg.Syntax = nil
+
+	return err
+}
+
+// parseFiles parses the files of the package into pkg.Syntax.
+// It reports false if the package has errors: the package is then ill-typed.
+func (lp *loadingPackage) parseFiles(mode parser.Mode) bool {
+	pkg := lp.pkg
+
 	// Many packages have few files, much fewer than there
 	// are CPU cores. Additionally, parsing each individual file is
 	// very fast. A naive parallel implementation of this loop won't
@@ -126,7 +173,7 @@ func (lp *loadingPackage) loadFromSource(loadMode LoadMode) error {
 	// bookkeeping and potentially false sharing of cache lines.
 	pkg.Syntax = make([]*ast.File, 0, len(pkg.CompiledGoFiles))
 	for _, file := range pkg.CompiledGoFiles {
-		f, err := parser.ParseFile(pkg.Fset, file, nil, parser.ParseComments)
+		f, err := parser.ParseFile(pkg.Fset, file, nil, mode)
 		if err != nil {
 			pkg.Errors = append(pkg.Errors, lp.convertError(err)...)
 			continue
@@ -135,12 +182,15 @@ func (lp *loadingPackage) loadFromSource(loadMode LoadMode) error {
 	}
 	if len(pkg.Errors) != 0 {
 		pkg.IllTyped = true
-		return nil
+		return false
 	}
 
-	if loadMode == LoadModeSyntax {
-		return nil
-	}
+	return true
+}
+
+// typeCheck type-checks pkg.Syntax into a new pkg.Types, and records the type information into info if it is not nil.
+func (lp *loadingPackage) typeCheck(info *types.Info, ignoreFuncBodies bool) error {
+	pkg := lp.pkg
 
 	// Call NewPackage directly with explicit name.
 	// This avoids skew between golist and go/types when the files'
@@ -153,17 +203,6 @@ func (lp *loadingPackage) loadFromSource(loadMode LoadMode) error {
 	pkg.Types = types.NewPackage(pkg.PkgPath, pkg.Name)
 
 	pkg.IllTyped = true
-
-	pkg.TypesInfo = &types.Info{
-		Types:        make(map[ast.Expr]types.TypeAndValue),
-		Instances:    make(map[*ast.Ident]types.Instance),
-		Defs:         make(map[*ast.Ident]types.Object),
-		Uses:         make(map[*ast.Ident]types.Object),
-		Implicits:    make(map[ast.Node]types.Object),
-		Selections:   make(map[*ast.SelectorExpr]*types.Selection),
-		Scopes:       make(map[ast.Node]*types.Scope),
-		FileVersions: make(map[*ast.File]string),
-	}
 
 	importer := func(path string) (*types.Package, error) {
 		if path == unsafePkgName {
@@ -201,11 +240,12 @@ func (lp *loadingPackage) loadFromSource(loadMode LoadMode) error {
 		Error: func(err error) {
 			pkg.Errors = append(pkg.Errors, lp.convertError(err)...)
 		},
-		GoVersion: goVersion,
-		Sizes:     types.SizesFor(build.Default.Compiler, build.Default.GOARCH),
+		GoVersion:        goVersion,
+		Sizes:            types.SizesFor(build.Default.Compiler, build.Default.GOARCH),
+		IgnoreFuncBodies: ignoreFuncBodies,
 	}
 
-	_ = types.NewChecker(tc, pkg.Fset, pkg.Types, pkg.TypesInfo).Files(pkg.Syntax)
+	_ = types.NewChecker(tc, pkg.Fset, pkg.Types, info).Files(pkg.Syntax)
 	// Don't handle error here: errors are adding by tc.Error function.
 
 	illTyped := len(pkg.Errors) != 0
@@ -294,15 +334,7 @@ func (lp *loadingPackage) loadWithFacts(loadMode LoadMode) error {
 	if pkg.TypesInfo != nil {
 		// Already loaded package, e.g. because another not go/analysis linter required types for deps.
 		// Try load cached facts for it.
-
-		for _, act := range lp.actions {
-			if !act.loadActionCachedFacts(false) {
-				// Cached facts loading failed: analyze later the action from source.
-				act.needAnalyzeSource = true
-				factsCacheDebugf("Loading of facts for already loaded %s failed, analyze it from source later", act)
-				act.markDepsForAnalyzingSource()
-			}
-		}
+		lp.loadCachedFacts()
 		return nil
 	}
 
@@ -318,50 +350,18 @@ func (lp *loadingPackage) loadWithFacts(loadMode LoadMode) error {
 func (lp *loadingPackage) loadImportedPackageWithFacts(loadMode LoadMode) error {
 	pkg := lp.pkg
 
-	// Load package from export data
 	if loadMode >= LoadModeTypesInfo {
-		if err := lp.loadFromExportData(); err != nil {
-			// We asked Go to give us up-to-date export data, yet
-			// we can't load it. There must be something wrong.
-			//
-			// Attempt loading from source. This should fail (because
-			// otherwise there would be export data); we just want to
-			// get the compile errors. If loading from source succeeds
-			// we discard the result, anyway. Otherwise, we'll fail
-			// when trying to reload from export data later.
+		loaded, err := lp.loadTypes(loadMode)
+		if err != nil {
+			return err
+		}
 
-			// Otherwise, it panics because uses already existing (from exported data) types.
-			pkg.Types = types.NewPackage(pkg.PkgPath, pkg.Name)
-			if srcErr := lp.loadFromSource(loadMode); srcErr != nil {
-				return srcErr
-			}
-
-			// Make sure this package can't be imported successfully
-			pkg.Errors = append(pkg.Errors, packages.Error{
-				Pos:  "-",
-				Msg:  fmt.Sprintf("could not load export data: %s", err),
-				Kind: packages.ParseError,
-			})
-
+		if !loaded {
 			return nil
 		}
 	}
 
-	needLoadFromSource := false
-	for _, act := range lp.actions {
-		if act.loadActionCachedFacts(false) {
-			continue
-		}
-
-		// Cached facts loading failed: analyze later the action from source.
-		factsCacheDebugf("Loading of facts for %s failed, analyze it from source later", act)
-		act.needAnalyzeSource = true // can't be set in parallel
-		needLoadFromSource = true
-
-		act.markDepsForAnalyzingSource()
-	}
-
-	if needLoadFromSource {
+	if lp.loadCachedFacts() {
 		// Cached facts loading failed: analyze later the action from source. To perform
 		// the analysis we need to load the package from source code.
 
@@ -400,6 +400,70 @@ func (lp *loadingPackage) loadImportedPackageWithFacts(loadMode LoadMode) error 
 	}
 
 	return nil
+}
+
+// loadTypes loads the types of the dependency: from source without the function bodies, or from export data.
+// It reports false if the types can't be loaded: the errors are reported, and the facts aren't loaded.
+func (lp *loadingPackage) loadTypes(loadMode LoadMode) (bool, error) {
+	pkg := lp.pkg
+
+	if lp.depsFromSource {
+		if err := lp.loadTypesFromSource(); err != nil {
+			return false, err
+		}
+
+		return len(pkg.Errors) == 0, nil
+	}
+
+	if err := lp.loadFromExportData(); err != nil {
+		// We asked Go to give us up-to-date export data, yet
+		// we can't load it. There must be something wrong.
+		//
+		// Attempt loading from source. This should fail (because
+		// otherwise there would be export data); we just want to
+		// get the compile errors. If loading from source succeeds
+		// we discard the result, anyway. Otherwise, we'll fail
+		// when trying to reload from export data later.
+
+		// Otherwise, it panics because uses already existing (from exported data) types.
+		pkg.Types = types.NewPackage(pkg.PkgPath, pkg.Name)
+		if srcErr := lp.loadFromSource(loadMode); srcErr != nil {
+			return false, srcErr
+		}
+
+		// Make sure this package can't be imported successfully
+		pkg.Errors = append(pkg.Errors, packages.Error{
+			Pos:  "-",
+			Msg:  fmt.Sprintf("could not load export data: %s", err),
+			Kind: packages.ParseError,
+		})
+
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// loadCachedFacts loads the cached facts of the actions,
+// and marks the actions without cached facts to be analyzed from source later.
+// It reports whether at least one action needs to be analyzed from source.
+func (lp *loadingPackage) loadCachedFacts() bool {
+	needAnalyzeSource := false
+
+	for _, act := range lp.actions {
+		if act.loadActionCachedFacts(false) {
+			continue
+		}
+
+		// Cached facts loading failed: analyze later the action from source.
+		factsCacheDebugf("Loading of facts for %s failed, analyze it from source later", act)
+		act.needAnalyzeSource = true // can't be set in parallel
+		needAnalyzeSource = true
+
+		act.markDepsForAnalyzingSource()
+	}
+
+	return needAnalyzeSource
 }
 
 func (lp *loadingPackage) decUse(canClearTypes bool) {

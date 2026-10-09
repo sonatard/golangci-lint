@@ -36,6 +36,31 @@ func CheckGoVersion(goVersion string) error {
 	return nil
 }
 
+// CheckToolchainVersion checks that the Go version of the toolchain (`go env GOVERSION`)
+// is not greater than the Go language version used to build golangci-lint.
+// It's required to type-check the dependencies from source:
+// the standard library of the toolchain can use language features unknown to the go/types of golangci-lint.
+func CheckToolchainVersion(toolchainVersion string) error {
+	rv, err := CleanRuntimeVersion()
+	if err != nil {
+		return fmt.Errorf("clean runtime version: %w", err)
+	}
+
+	tv, err := cleanRuntimeVersion(toolchainVersion)
+	if err != nil {
+		return fmt.Errorf("clean toolchain version: %w", err)
+	}
+
+	runtimeLang, toolchainLang := version.Lang(rv), version.Lang(tv)
+
+	if version.Compare(runtimeLang, toolchainLang) < 0 {
+		return fmt.Errorf("the Go language version (%s) used to build golangci-lint is lower than the Go version of the toolchain (%s): "+
+			"the dependencies can't be type-checked from source (run.deps-mode: source)", runtimeLang, toolchainLang)
+	}
+
+	return nil
+}
+
 // TrimGoVersion Trims the Go version to keep only M.m.
 // Since Go 1.21 the version inside the go.mod can be a patched version (ex: 1.21.0).
 // The version can also include information which we want to remove (ex: 1.21alpha1)

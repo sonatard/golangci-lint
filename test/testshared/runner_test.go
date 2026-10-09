@@ -12,6 +12,9 @@ import (
 const cmdNameRun = "run"
 
 func TestRunnerBuilder_Runner(t *testing.T) {
+	// The arguments must not depend on the deps mode used to run the tests.
+	t.Setenv(envDepsMode, "")
+
 	testCases := []struct {
 		desc     string
 		builder  *RunnerBuilder

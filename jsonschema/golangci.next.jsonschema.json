@@ -811,6 +811,12 @@
         "wd"
       ]
     },
+    "deps-modes": {
+      "enum": [
+        "export",
+        "source"
+      ]
+    },
     "simple-format": {
       "type": "object",
       "additionalProperties": false,
@@ -4947,6 +4953,12 @@
           "description": "Allow multiple golangci-lint instances running, but serialize them around a lock.",
           "type": "boolean",
           "default": false
+        },
+        "deps-mode": {
+          "description": "How the dependencies are type-checked: `export` reads the export data produced by `go list -export` (it compiles the dependencies), `source` type-checks them from source (the Go dependencies are not compiled, cgo still runs for the cgo dependencies).",
+          "type": "string",
+          "$ref": "#/definitions/deps-modes",
+          "default": "export"
         },
         "go": {
           "description": "Targeted Go version.",

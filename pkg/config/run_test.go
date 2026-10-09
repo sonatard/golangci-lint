@@ -35,6 +35,24 @@ func TestRun_Validate(t *testing.T) {
 				ModulesDownloadMode: "",
 			},
 		},
+		{
+			desc: "deps-mode: export",
+			settings: &Run{
+				DepsMode: "export",
+			},
+		},
+		{
+			desc: "deps-mode: source",
+			settings: &Run{
+				DepsMode: "source",
+			},
+		},
+		{
+			desc: "deps-mode: empty",
+			settings: &Run{
+				DepsMode: "",
+			},
+		},
 	}
 
 	for _, test := range testCases {
@@ -59,6 +77,13 @@ func TestRun_Validate_error(t *testing.T) {
 				ModulesDownloadMode: "invalid",
 			},
 			expected: "invalid modules download path invalid, only (mod|readonly|vendor) allowed",
+		},
+		{
+			desc: "deps-mode: invalid",
+			settings: &Run{
+				DepsMode: "invalid",
+			},
+			expected: "invalid deps mode invalid, only (export|source) allowed",
 		},
 	}
 

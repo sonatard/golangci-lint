@@ -28,7 +28,16 @@ type Run struct {
 
 	AllowParallelRunners bool `mapstructure:"allow-parallel-runners"`
 	AllowSerialRunners   bool `mapstructure:"allow-serial-runners"`
+
+	DepsMode string `mapstructure:"deps-mode"`
 }
+
+const (
+	// DepsModeExport reads the export data of the dependencies produced by `go list -export`.
+	DepsModeExport = "export"
+	// DepsModeSource type-checks the dependencies from source.
+	DepsModeSource = "source"
+)
 
 func (r *Run) Validate() error {
 	// go help modules
@@ -42,6 +51,12 @@ func (r *Run) Validate() error {
 
 	if r.RelativePathMode != "" && !slices.Contains(pathRelativeToModes, r.RelativePathMode) {
 		return fmt.Errorf("invalid relative path mode %s, only (%s) allowed", r.RelativePathMode, strings.Join(pathRelativeToModes, "|"))
+	}
+
+	depsModes := []string{DepsModeExport, DepsModeSource}
+
+	if r.DepsMode != "" && !slices.Contains(depsModes, r.DepsMode) {
+		return fmt.Errorf("invalid deps mode %s, only (%s) allowed", r.DepsMode, strings.Join(depsModes, "|"))
 	}
 
 	return nil
