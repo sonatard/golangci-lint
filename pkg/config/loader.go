@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/ldez/grignotin/goenv"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
@@ -104,7 +105,7 @@ func (l *Loader) Load(opts LoadOptions) error {
 
 	l.handleGoVersion()
 
-	err = goutil.CheckGoVersion(l.cfg.Run.Go)
+	err = l.checkGoVersion()
 	if err != nil {
 		return err
 	}
@@ -178,6 +179,26 @@ func (l *Loader) handleGoVersion() {
 	l.cfg.Linters.Settings.Gocritic.Go = trimmedGoVersion
 
 	os.Setenv("GOSECGOVERSION", l.cfg.Run.Go)
+}
+
+// checkGoVersion checks that golangci-lint can type-check the targeted Go version,
+// and the standard library of the toolchain when the dependencies are type-checked from source.
+func (l *Loader) checkGoVersion() error {
+	err := goutil.CheckGoVersion(l.cfg.Run.Go)
+	if err != nil {
+		return err
+	}
+
+	if l.cfg.Run.DepsMode != DepsModeSource {
+		return nil
+	}
+
+	values, err := goenv.Get(context.Background(), goenv.GOVERSION)
+	if err != nil {
+		return fmt.Errorf("get the Go version of the toolchain: %w", err)
+	}
+
+	return goutil.CheckToolchainVersion(values[goenv.GOVERSION])
 }
 
 func (l *Loader) handleDeprecation() error {

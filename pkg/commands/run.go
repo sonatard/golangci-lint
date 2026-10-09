@@ -681,7 +681,7 @@ func computeBinarySalt(version string) ([]byte, error) {
 // computeConfigSalt computes configuration hash.
 // We don't hash all config fields to reduce meaningless cache invalidations.
 // At least, it has a huge impact on tests speed.
-// Fields: `LintersSettings` and `Run.BuildTags`.
+// Fields: `LintersSettings`, `Run.BuildTags`, and `Run.DepsMode` (only `source`, to keep the existing caches).
 func computeConfigSalt(cfg *config.Config) ([]byte, error) {
 	lintersSettingsBytes, err := yaml.Marshal(cfg.Linters.Settings)
 	if err != nil {
@@ -691,6 +691,11 @@ func computeConfigSalt(cfg *config.Config) ([]byte, error) {
 	configData := bytes.NewBufferString("linters.settings=")
 	configData.Write(lintersSettingsBytes)
 	configData.WriteString("\nbuild-tags=" + strings.Join(cfg.Run.BuildTags, ","))
+
+	// The errors of the dependencies are reported differently by each mode.
+	if cfg.Run.DepsMode == config.DepsModeSource {
+		configData.WriteString("\ndeps-mode=" + cfg.Run.DepsMode)
+	}
 
 	h := sha256.New()
 	if _, err := h.Write(configData.Bytes()); err != nil {

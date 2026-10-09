@@ -199,6 +199,123 @@ func TestCgoWithIssues(t *testing.T) {
 	}
 }
 
+func TestDepsMode(t *testing.T) {
+	binPath := testshared.InstallGolangciLint(t)
+
+	testCases := []struct {
+		desc       string
+		args       []string
+		exportData bool
+		expected   string
+	}{
+		{
+			desc:       "govet with deps-mode export",
+			args:       []string{"--no-config", "--default=none", "-Egovet", "-v", "--deps-mode=export"},
+			exportData: true,
+			expected:   `dep.Printf format %d has arg "x" of wrong type string`,
+		},
+		{
+			desc:       "govet with deps-mode source",
+			args:       []string{"--no-config", "--default=none", "-Egovet", "-v", "--deps-mode=source"},
+			exportData: false,
+			expected:   `dep.Printf format %d has arg "x" of wrong type string`,
+		},
+		{
+			desc:       "staticcheck with deps-mode export",
+			args:       []string{"--no-config", "--default=none", "-Estaticcheck", "-v", "--deps-mode=export"},
+			exportData: true,
+			expected:   "dep.Old is deprecated: use New instead.",
+		},
+		{
+			desc:       "staticcheck with deps-mode source",
+			args:       []string{"--no-config", "--default=none", "-Estaticcheck", "-v", "--deps-mode=source"},
+			exportData: false,
+			expected:   "dep.Old is deprecated: use New instead.",
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
+
+			result := testshared.NewRunnerBuilder(t).
+				WithArgs(test.args...).
+				WithTargetPath(testdataDir, "deps_mode").
+				WithBinPath(binPath).
+				Runner().
+				Run().
+				ExpectHasIssue(test.expected)
+
+			// The verbose output prints the load mode of the packages:
+			// "exports_file" means that `go list -export` compiled the dependencies.
+			if test.exportData {
+				result.ExpectOutputContains("exports_file")
+			} else {
+				result.ExpectOutputNotContains("exports_file")
+			}
+		})
+	}
+}
+
+// TestDepsMode_cachedFacts checks that the facts of a dependency are loaded from the cache onto its types:
+// the second run shares the cache of the first run, but enables another linter,
+// so the issues of the target package aren't cached, but the facts of the dependency are.
+func TestDepsMode_cachedFacts(t *testing.T) {
+	binPath := testshared.InstallGolangciLint(t)
+
+	testCases := []struct {
+		desc     string
+		linter   string
+		analyzer string
+		expected string
+	}{
+		{
+			desc:     "govet",
+			linter:   "govet",
+			analyzer: "printf",
+			expected: `dep.Printf format %d has arg "x" of wrong type string`,
+		},
+		{
+			desc:     "staticcheck",
+			linter:   "staticcheck",
+			analyzer: "fact_deprecated",
+			expected: "dep.Old is deprecated: use New instead.",
+		},
+	}
+
+	for _, mode := range []string{"export", "source"} {
+		for _, test := range testCases {
+			t.Run(mode+" "+test.desc, func(t *testing.T) {
+				t.Parallel()
+
+				cacheDir := t.TempDir()
+
+				run := func(linters ...string) *testshared.RunnerResult {
+					args := []string{"--no-config", "--default=none", "--deps-mode=" + mode}
+					for _, linter := range linters {
+						args = append(args, "-E"+linter)
+					}
+
+					return testshared.NewRunnerBuilder(t).
+						WithEnviron("GOLANGCI_LINT_CACHE="+cacheDir, "GL_DEBUG=goanalysis/facts/cache").
+						WithArgs(args...).
+						WithTargetPath(testdataDir, "deps_mode").
+						WithBinPath(binPath).
+						Runner().
+						Run()
+				}
+
+				run(test.linter).
+					ExpectHasIssue(test.expected)
+
+				run(test.linter, "ineffassign").
+					ExpectHasIssue(test.expected).
+					ExpectOutputRegexp(`Loaded \d+ cached facts for package \\?"dep\\?" and analyzer ` + test.analyzer)
+			})
+		}
+	}
+}
+
 // https://pkg.go.dev/cmd/compile#hdr-Compiler_Directives
 func TestLineDirective(t *testing.T) {
 	binPath := testshared.InstallGolangciLint(t)

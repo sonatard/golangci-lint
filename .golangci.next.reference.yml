@@ -5066,6 +5066,14 @@ run:
   # Default: false
   allow-serial-runners: true
 
+  # How the dependencies are type-checked.
+  # The value can be:
+  # - `export`: read the export data of the dependencies produced by `go list -export` (it compiles the dependencies).
+  # - `source`: type-check the dependencies from source (the Go dependencies are not compiled, cgo still runs for the cgo dependencies).
+  #   It requires golangci-lint built with a Go version greater than or equal to the Go version of the toolchain.
+  # Default: export
+  deps-mode: source
+
   # Define the Go version limit.
   # Default: use Go version from the go.mod file, fallback on the env var `GOVERSION`, fallback on 1.22.
   go: '1.23'
